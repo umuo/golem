@@ -196,6 +196,7 @@ replace github.com/sbgayhub/golem/sdk => ../sdk
 | **universal** | 规则驱动的通用 API 请求插件 | v1.0.0 |
 | **video_parser** | 视频在线解析插件 | v1.0.0 |
 | **gg** | 图片生成插件，基于 gg 库 | v0.0.0 |
+| **onebot11** | OneBot 11 兼容 WebSocket 网关 | v0.2.1 |
 | **example** | 基础示例插件，展示核心功能 | v1.0.0 |
 
 详细说明请查看 [plugins/readme.md](plugins/readme.md)

@@ -13,7 +13,7 @@ func (m *MemePlugin) uploadImage(avatarURL string) (string, error) {
 		"type": "url",
 		"url":  avatarURL,
 	})
-	resp, err := http.Post(m.Config.Url+"/image/upload", "application/json", bytes.NewReader(body))
+	resp, err := http.Post(m.apiURL("/image/upload"), "application/json", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -39,7 +39,7 @@ func (m *MemePlugin) generateMeme(key string, images []map[string]string, texts 
 	}
 	body, _ := json.Marshal(payload)
 
-	resp, err := http.Post(m.Config.Url+"/memes/"+key, "application/json", bytes.NewReader(body))
+	resp, err := http.Post(m.apiURL("/memes/"+key), "application/json", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -68,7 +68,7 @@ func (m *MemePlugin) generateMeme(key string, images []map[string]string, texts 
 }
 
 func (m *MemePlugin) downloadImage(imageID string) ([]byte, error) {
-	resp, err := http.Get(m.Config.Url + "/image/" + imageID)
+	resp, err := http.Get(m.apiURL("/image/" + imageID))
 	if err != nil {
 		return nil, err
 	}

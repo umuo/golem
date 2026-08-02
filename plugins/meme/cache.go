@@ -2,15 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
 func (m *MemePlugin) loadCache() error {
-	resp, err := http.Get(m.Config.Url + "/meme/infos")
+	resp, err := http.Get(m.apiURL("/meme/infos"))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("meme-api 返回异常状态码: %d", resp.StatusCode)
+	}
 
 	var infos []*memeInfo
 	if err := json.NewDecoder(resp.Body).Decode(&infos); err != nil {

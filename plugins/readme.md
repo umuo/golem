@@ -667,6 +667,7 @@ cp my_plugin.exe ../
 | **video_parser** | 视频在线解析插件 |
 | **gg** | 图片生成插件，基于 gg 库 |
 | **wordcloud** | 词云插件，统计群聊发言生成词云图片 |
+| **onebot11** | 通过 WebSocket 暴露 OneBot 11 兼容消息事件与 Action |
 
 ---
 

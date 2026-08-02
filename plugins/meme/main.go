@@ -15,8 +15,10 @@ import (
 var prefixes = []string{"meme", "emoji", "表情"}
 
 type Config struct {
-	Url string
+	Url string `toml:"url"`
 }
+
+const defaultMemeAPIURL = "http://127.0.0.1:2233"
 
 type MemePlugin struct {
 	message  message.Ability
@@ -30,8 +32,8 @@ type MemePlugin struct {
 
 func (m *MemePlugin) OnLoad() error {
 	if err := m.loadCache(); err != nil {
-		slog.Warn("meme 缓存加载失败", "err", err)
-		return err
+		slog.Warn("meme 缓存加载失败，插件将在服务恢复后通过 reload 命令重试", "err", err)
+		return nil
 	}
 
 	slog.Info("meme 缓存加载完成", "count", len(m.infos))
@@ -220,5 +222,21 @@ func (m *MemePlugin) OnEvent(event *plugin.Event) (bool, error) {
 }
 
 func main() {
-	plugin.Start(&MemePlugin{})
+	plugin.Start(newMemePlugin())
+}
+
+func newMemePlugin() *MemePlugin {
+	return &MemePlugin{
+		ConfigAbility: plugin.ConfigAbility[Config]{
+			Config: Config{Url: defaultMemeAPIURL},
+		},
+	}
+}
+
+func (m *MemePlugin) apiURL(path string) string {
+	baseURL := strings.TrimRight(strings.TrimSpace(m.Config.Url), "/")
+	if baseURL == "" {
+		baseURL = defaultMemeAPIURL
+	}
+	return baseURL + path
 }
