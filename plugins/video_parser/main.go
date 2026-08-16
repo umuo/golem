@@ -3,14 +3,20 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
+	"time"
 
+	"github.com/sbgayhub/golem/sdk/cdn"
+	"github.com/sbgayhub/golem/sdk/contact"
 	"github.com/sbgayhub/golem/sdk/message"
 	"github.com/sbgayhub/golem/sdk/plugin"
 	"github.com/wujunwei928/parse-video/parser"
 )
 
 type VideoParserPlugin struct {
-	message message.Ability
+	message    message.Ability
+	cdn        cdn.Ability
+	httpClient *http.Client
 }
 
 func (v *VideoParserPlugin) GetMetadata() *plugin.Metadata {
@@ -44,23 +50,25 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 		return false, err
 	}
 
-	targetUrl := info.VideoUrl
-	if targetUrl == "" && len(info.Images) > 0 {
-		targetUrl = info.CoverUrl
-		if targetUrl == "" {
-			targetUrl = info.Images[0].Url
-		}
+	if v.httpClient == nil {
+		v.httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
 
+	// 如果包含图集/图文，发送合并转发聊天记录
+	if len(info.Images) > 0 {
+		return v.sendImageRecord(msg.Sender, info)
+	}
+
+	// 视频消息：发送链接卡片
 	_, err = v.message.Send(&message.Message{
 		Receiver: msg.Sender,
 		Type:     message.TypeAppLink,
-		Content:  fmt.Sprintf("[%s] %s", info.Title, targetUrl),
+		Content:  fmt.Sprintf("[%s] %s", info.Title, info.VideoUrl),
 		Data: &message.Message_App{App: &message.AppData{
 			SubType: 5,
 			Title:   info.Title,
 			Desc:    info.Author.Name,
-			Url:     targetUrl,
+			Url:     info.VideoUrl,
 			Xml:     info.CoverUrl,
 		}},
 	})
@@ -73,6 +81,42 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	return true, nil
 }
 
+func (v *VideoParserPlugin) sendImageRecord(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
+	authorName := info.Author.Name
+	if authorName == "" {
+		authorName = "作者"
+	}
+	title := info.Title
+	if title == "" {
+		title = fmt.Sprintf("%s 的图文作品", authorName)
+	}
+	desc := fmt.Sprintf("%s: 共 %d 张图片", authorName, len(info.Images))
+
+	items := v.buildImageRecordItems(info)
+	xmlContent := buildChatRecordXML(title, desc, items, info.Author.Avatar)
+
+	_, err := v.message.Send(&message.Message{
+		Receiver: receiver,
+		Type:     message.TypeApplication,
+		Content:  fmt.Sprintf("[%s] %s", title, desc),
+		Data: &message.Message_App{App: &message.AppData{
+			SubType: 19,
+			Title:   title,
+			Desc:    desc,
+			Xml:     xmlContent,
+		}},
+	})
+
+	if err != nil {
+		slog.Warn("发送图文合并转发失败", "err", err)
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func main() {
-	plugin.Start(&VideoParserPlugin{})
+	plugin.Start(&VideoParserPlugin{
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+	})
 }
