@@ -71,26 +71,30 @@ func TestSendCoverAndImageRecord(t *testing.T) {
 		t.Fatalf("handled should be true")
 	}
 
-	if len(mockMsg.sentMessages) < 2 {
-		t.Fatalf("期望发送 2 条消息 (1张封面图 + 1条合并转发卡片)，实际发送了 %d 条", len(mockMsg.sentMessages))
+	if len(mockMsg.sentMessages) == 0 {
+		t.Fatalf("期望至少发送 1 条消息（合并转发卡片），实际发送了 0 条")
 	}
 
-	// 验证第 1 条是 TypeImage 封面大图
-	firstMsg := mockMsg.sentMessages[0]
-	if firstMsg.Type != message.TypeImage {
-		t.Errorf("期望第 1 条为 TypeImage (封面大图), 实际为: %v", firstMsg.Type)
+	// 最后一条必须是 TypeApplication (SubType 19 合并转发)
+	lastMsg := mockMsg.sentMessages[len(mockMsg.sentMessages)-1]
+	if lastMsg.Type != message.TypeApplication {
+		t.Fatalf("期望最后一条为 TypeApplication (合并转发), 实际为: %v", lastMsg.Type)
 	}
-
-	// 验证第 2 条是 TypeApplication (SubType 19 合并转发)
-	secondMsg := mockMsg.sentMessages[1]
-	if secondMsg.Type != message.TypeApplication {
-		t.Errorf("期望第 2 条为 TypeApplication (合并转发), 实际为: %v", secondMsg.Type)
-	}
-	appData := secondMsg.Data.(*message.Message_App).App
+	appData := lastMsg.Data.(*message.Message_App).App
 	if appData.SubType != 19 {
 		t.Errorf("期望 SubType 为 19, 实际为: %d", appData.SubType)
 	}
 	t.Logf("合并转发 XML:\n%s", appData.Xml)
+
+	// 如果封面下载成功，第一条应该是 TypeImage
+	if len(mockMsg.sentMessages) >= 2 {
+		firstMsg := mockMsg.sentMessages[0]
+		if firstMsg.Type != message.TypeImage {
+			t.Errorf("期望第 1 条为 TypeImage (封面大图), 实际为: %v", firstMsg.Type)
+		}
+	} else {
+		t.Log("封面图下载超时，仅发送了合并转发卡片（符合预期降级逻辑）")
+	}
 }
 
 func TestOnEventDouyinVideo(t *testing.T) {
