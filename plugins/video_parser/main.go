@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/sbgayhub/golem/sdk/cdn"
@@ -13,7 +15,13 @@ import (
 	"github.com/wujunwei928/parse-video/parser"
 )
 
+// Config 视频解析插件配置
+type Config struct {
+	RedirectURL string `toml:"redirect_url" comment:"重定向 API 地址，例如：https://next-url-redirector.pages.dev/go?url="`
+}
+
 type VideoParserPlugin struct {
+	plugin.ConfigAbility[Config]
 	message    message.Ability
 	cdn        cdn.Ability
 	httpClient *http.Client
@@ -33,6 +41,27 @@ func (v *VideoParserPlugin) GetMetadata() *plugin.Metadata {
 
 func (v *VideoParserPlugin) GetSubscriptions() []string {
 	return []string{message.TypeText.Topic}
+}
+
+func (v *VideoParserPlugin) getRedirectVideoURL(rawVideoURL string) string {
+	redirectURL := strings.TrimSpace(v.Config.RedirectURL)
+	if redirectURL == "" || rawVideoURL == "" {
+		return rawVideoURL
+	}
+
+	if strings.Contains(redirectURL, "{url}") {
+		return strings.ReplaceAll(redirectURL, "{url}", url.QueryEscape(rawVideoURL))
+	}
+
+	if strings.HasSuffix(redirectURL, "=") {
+		return redirectURL + url.QueryEscape(rawVideoURL)
+	}
+
+	if strings.Contains(redirectURL, "?") {
+		return redirectURL + "&url=" + url.QueryEscape(rawVideoURL)
+	}
+
+	return redirectURL + "?url=" + url.QueryEscape(rawVideoURL)
 }
 
 func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
@@ -59,16 +88,18 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 		return v.sendImageRecord(msg.Sender, info)
 	}
 
+	videoURL := v.getRedirectVideoURL(info.VideoUrl)
+
 	// 视频消息：发送链接卡片
 	_, err = v.message.Send(&message.Message{
 		Receiver: msg.Sender,
 		Type:     message.TypeAppLink,
-		Content:  fmt.Sprintf("[%s] %s", info.Title, info.VideoUrl),
+		Content:  fmt.Sprintf("[%s] %s", info.Title, videoURL),
 		Data: &message.Message_App{App: &message.AppData{
 			SubType: 5,
 			Title:   info.Title,
 			Desc:    info.Author.Name,
-			Url:     info.VideoUrl,
+			Url:     videoURL,
 			Xml:     info.CoverUrl,
 		}},
 	})

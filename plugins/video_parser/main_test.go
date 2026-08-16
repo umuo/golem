@@ -156,3 +156,28 @@ func TestOnEventDouyinVideo(t *testing.T) {
 	}
 	t.Log("抖音视频流程测试成功")
 }
+
+func TestGetRedirectVideoURL(t *testing.T) {
+	p := &VideoParserPlugin{}
+
+	rawURL := "https://www.iesdouyin.com/aweme/v1/play/?video_id=v2800fgi0000d9r7uofog65ju1flrgp0&ratio=1080p&line=0"
+
+	// 1. 无配置
+	if got := p.getRedirectVideoURL(rawURL); got != rawURL {
+		t.Errorf("期望无配置返回原始链接，实际: %s", got)
+	}
+
+	// 2. 配置了带等号的 redirect_url: https://next-url-redirector.pages.dev/go?url=
+	p.Config.RedirectURL = "https://next-url-redirector.pages.dev/go?url="
+	expected := "https://next-url-redirector.pages.dev/go?url=https%3A%2F%2Fwww.iesdouyin.com%2Faweme%2Fv1%2Fplay%2F%3Fvideo_id%3Dv2800fgi0000d9r7uofog65ju1flrgp0%26ratio%3D1080p%26line%3D0"
+	if got := p.getRedirectVideoURL(rawURL); got != expected {
+		t.Errorf("期望重定向格式:\n%s\n实际:\n%s", expected, got)
+	}
+
+	// 3. 配置了带模板的 redirect_url: https://example.com/play?target={url}&v=1
+	p.Config.RedirectURL = "https://example.com/play?target={url}&v=1"
+	expectedTemplate := "https://example.com/play?target=https%3A%2F%2Fwww.iesdouyin.com%2Faweme%2Fv1%2Fplay%2F%3Fvideo_id%3Dv2800fgi0000d9r7uofog65ju1flrgp0%26ratio%3D1080p%26line%3D0&v=1"
+	if got := p.getRedirectVideoURL(rawURL); got != expectedTemplate {
+		t.Errorf("期望模板替换格式:\n%s\n实际:\n%s", expectedTemplate, got)
+	}
+}

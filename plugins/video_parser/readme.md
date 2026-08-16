@@ -28,11 +28,27 @@ https://v.douyin.com/xxxxx/
 # 快手分享链接
 https://v.kuaishou.com/xxxxx
 
-# 视频号分享链接
-https://channels.weixin.qq.com/xxxxx
+# 小红书分享链接
+https://xhslink.cn/xxxxx
 ```
 
-插件会自动识别并解析，返回视频信息卡片。
+插件会自动识别并解析：
+- **视频**：返回视频卡片（支持重定向中转配置）
+- **图文笔记**：以合并转发聊天记录形式直接展示全部高清原图
+
+## ⚙️ 插件配置
+
+在 `host/plugins/config.toml` 中可以为 `video_parser` 进行个性化配置：
+
+```toml
+[video_parser]
+enable = true
+
+[video_parser.config]
+# 视频直链重定向 API 地址（可选）。
+# 配置后，视频卡片直链会自动包装为中转地址（防止微信外链风控折叠）；未配置则直接发送原始直链。
+redirect_url = "https://next-url-redirector.pages.dev/go?url="
+```
 
 ## 🎯 工作原理
 
