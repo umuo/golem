@@ -143,3 +143,28 @@ func TestFallbackVideoText(t *testing.T) {
 	}
 	t.Logf("降级文本内容:\n%s", lastMsg.Content)
 }
+
+func TestGetRedirectVideoURL(t *testing.T) {
+	p := &VideoParserPlugin{}
+
+	rawURL := "https://v5-dy-ov-experiment.zjcdn.com/9593c276a6589399acf6e8853d87ce0f/6a816707/video/tos/cn/tos-cn-ve-15c000-ce/oEe6hnd4DI1uk2n9A7Fgov9hhBfmqXEQE1wLAd/?a=6383"
+
+	// 1. 无配置
+	if got := p.getRedirectVideoURL(rawURL); got != rawURL {
+		t.Errorf("期望无配置返回原始链接，实际: %s", got)
+	}
+
+	// 2. 配置了带等号的 redirect_url
+	p.Config.RedirectURL = "https://next-url-redirector.pages.dev/go?url="
+	expected := "https://next-url-redirector.pages.dev/go?url=https%3A%2F%2Fv5-dy-ov-experiment.zjcdn.com%2F9593c276a6589399acf6e8853d87ce0f%2F6a816707%2Fvideo%2Ftos%2Fcn%2Ftos-cn-ve-15c000-ce%2FoEe6hnd4DI1uk2n9A7Fgov9hhBfmqXEQE1wLAd%2F%3Fa%3D6383"
+	if got := p.getRedirectVideoURL(rawURL); got != expected {
+		t.Errorf("期望重定向格式:\n%s\n实际:\n%s", expected, got)
+	}
+
+	// 3. 配置了带模板的 redirect_url
+	p.Config.RedirectURL = "https://example.com/play?v={url}"
+	expectedTemplate := "https://example.com/play?v=https%3A%2F%2Fv5-dy-ov-experiment.zjcdn.com%2F9593c276a6589399acf6e8853d87ce0f%2F6a816707%2Fvideo%2Ftos%2Fcn%2Ftos-cn-ve-15c000-ce%2FoEe6hnd4DI1uk2n9A7Fgov9hhBfmqXEQE1wLAd%2F%3Fa%3D6383"
+	if got := p.getRedirectVideoURL(rawURL); got != expectedTemplate {
+		t.Errorf("期望模板替换格式:\n%s\n实际:\n%s", expectedTemplate, got)
+	}
+}

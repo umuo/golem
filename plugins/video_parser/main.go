@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,7 +16,13 @@ import (
 	"github.com/wujunwei928/parse-video/parser"
 )
 
+// Config 视频解析插件配置
+type Config struct {
+	RedirectURL string `toml:"redirect_url" comment:"视频直链重定向 API 地址，例如：https://next-url-redirector.pages.dev/go?url="`
+}
+
 type VideoParserPlugin struct {
+	plugin.ConfigAbility[Config]
 	message    message.Ability
 	httpClient *http.Client
 }
@@ -34,6 +41,27 @@ func (v *VideoParserPlugin) GetMetadata() *plugin.Metadata {
 
 func (v *VideoParserPlugin) GetSubscriptions() []string {
 	return []string{message.TypeText.Topic}
+}
+
+func (v *VideoParserPlugin) getRedirectVideoURL(rawVideoURL string) string {
+	redirectURL := strings.TrimSpace(v.Config.RedirectURL)
+	if redirectURL == "" || rawVideoURL == "" {
+		return rawVideoURL
+	}
+
+	if strings.Contains(redirectURL, "{url}") {
+		return strings.ReplaceAll(redirectURL, "{url}", url.QueryEscape(rawVideoURL))
+	}
+
+	if strings.HasSuffix(redirectURL, "=") {
+		return redirectURL + url.QueryEscape(rawVideoURL)
+	}
+
+	if strings.Contains(redirectURL, "?") {
+		return redirectURL + "&url=" + url.QueryEscape(rawVideoURL)
+	}
+
+	return redirectURL + "?url=" + url.QueryEscape(rawVideoURL)
 }
 
 func downloadImage(ctx context.Context, client *http.Client, imgUrl string) ([]byte, error) {
@@ -85,16 +113,18 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 		return v.sendCoverAndImageLinks(msg.Sender, info)
 	}
 
-	// 视频消息：直接使用底层解析返回的长直链发送链接卡片
+	videoURL := v.getRedirectVideoURL(info.VideoUrl)
+
+	// 视频消息：发送链接卡片
 	_, err = v.message.Send(&message.Message{
 		Receiver: msg.Sender,
 		Type:     message.TypeAppLink,
-		Content:  fmt.Sprintf("[%s] %s", info.Title, info.VideoUrl),
+		Content:  fmt.Sprintf("[%s] %s", info.Title, videoURL),
 		Data: &message.Message_App{App: &message.AppData{
 			SubType: 5,
 			Title:   info.Title,
 			Desc:    info.Author.Name,
-			Url:     info.VideoUrl,
+			Url:     videoURL,
 			Xml:     info.CoverUrl,
 		}},
 	})
@@ -176,7 +206,8 @@ func (v *VideoParserPlugin) sendFallbackVideoText(receiver *contact.Contact, inf
 		authorName = "作者"
 	}
 
-	content := fmt.Sprintf("🎬 %s\n👤 %s\n🔗 视频直链：\n%s", info.Title, authorName, info.VideoUrl)
+	targetURL := v.getRedirectVideoURL(info.VideoUrl)
+	content := fmt.Sprintf("🎬 %s\n👤 %s\n🔗 视频直链：\n%s", info.Title, authorName, targetURL)
 
 	_, err := v.message.Send(&message.Message{
 		Receiver: receiver,
