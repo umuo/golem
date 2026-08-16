@@ -39,6 +39,12 @@ func (p *SetuPlugin) handlePlmm(receiver *contact.Contact) (bool, error) {
 		return true, nil
 	}
 
+	if !strings.HasPrefix(imgURL, "http://") && !strings.HasPrefix(imgURL, "https://") {
+		slog.Warn("[setu] 漂亮妹妹 API 返回非图片地址", "response", imgURL)
+		p.sendText(receiver, "获取图片失败: 第三方接口异常或维护中")
+		return true, nil
+	}
+
 	slog.Debug("[setu] 获取到图片 URL", "url", imgURL)
 
 	if err := p.sendImage(receiver, imgURL); err != nil {
@@ -83,6 +89,12 @@ func (p *SetuPlugin) handleBoy(receiver *contact.Contact) (bool, error) {
 	imgURL, err := p.httpGet(p.Config.BoyURL)
 	if err != nil || imgURL == "" {
 		p.sendText(receiver, "获取帅哥图片失败")
+		return true, nil
+	}
+
+	if !strings.HasPrefix(imgURL, "http://") && !strings.HasPrefix(imgURL, "https://") {
+		slog.Warn("[setu] 帅哥 API 返回非图片地址", "response", imgURL)
+		p.sendText(receiver, "获取图片失败: 第三方接口异常或维护中")
 		return true, nil
 	}
 

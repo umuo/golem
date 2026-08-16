@@ -22,3 +22,6 @@ data
 # python
 __pycache__/
 *.py[cod]
+
+# build & dist
+dist/

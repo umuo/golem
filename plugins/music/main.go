@@ -18,13 +18,13 @@ type MusicPlugin struct {
 }
 
 var xmlTemplate = `<appmsg appid="%s" sdkver="0">
-    <title>%s</title>
-    <des>%s</des>
+    <title><![CDATA[%s]]></title>
+    <des><![CDATA[%s]]></des>
     <action>view</action>
     <type>3</type>
-    <dataurl>%s</dataurl>
-    <songalbumurl>%s</songalbumurl>
-    <songlyric>%s</songlyric>
+    <dataurl><![CDATA[%s]]></dataurl>
+    <songalbumurl><![CDATA[%s]]></songalbumurl>
+    <songlyric><![CDATA[%s]]></songlyric>
 </appmsg>
 `
 
@@ -54,7 +54,7 @@ func (m *MusicPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	}
 
 	name := ltrim(msg.Content, prefixes...)
-	resp, err := http.DefaultClient.Get("https://109a.cn/API/qqyy/api.php?msg=" + url.PathEscape(name))
+	resp, err := http.DefaultClient.Get("https://109a.cn/API/qqyy/api.php?msg=" + url.QueryEscape(name))
 	if err != nil {
 		slog.Warn("[music] 请求失败", "err", err)
 		return false, err
