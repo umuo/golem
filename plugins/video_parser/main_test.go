@@ -181,3 +181,31 @@ func TestGetRedirectVideoURL(t *testing.T) {
 		t.Errorf("期望模板替换格式:\n%s\n实际:\n%s", expectedTemplate, got)
 	}
 }
+
+func TestFallbackVideoText(t *testing.T) {
+	mockMsg := &mockMessageAbility{}
+	p := &VideoParserPlugin{
+		message: mockMsg,
+	}
+
+	info := &parser.VideoParseInfo{
+		Title:    "张震岳悉尼演唱会",
+		VideoUrl: "https://www.iesdouyin.com/aweme/v1/play/?video_id=v2800fgi0000d9r7uofog65ju1flrgp0&ratio=1080p&line=0",
+	}
+	info.Author.Name = "張震嶽"
+
+	ok, err := p.sendFallbackVideoText(&contact.Contact{Username: "group@chatroom", Nickname: "测试群"}, info)
+	if err != nil || !ok {
+		t.Fatalf("sendFallbackVideoText 失败: %v", err)
+	}
+
+	if len(mockMsg.sentMessages) == 0 {
+		t.Fatalf("未发送降级文本消息")
+	}
+
+	lastMsg := mockMsg.sentMessages[len(mockMsg.sentMessages)-1]
+	if lastMsg.Type != message.TypeText {
+		t.Errorf("期望降级消息类型为 TypeText, 实际: %v", lastMsg.Type)
+	}
+	t.Logf("降级文本内容:\n%s", lastMsg.Content)
+}

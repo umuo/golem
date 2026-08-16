@@ -64,6 +64,38 @@ func (v *VideoParserPlugin) getRedirectVideoURL(rawVideoURL string) string {
 	return redirectURL + "?url=" + url.QueryEscape(rawVideoURL)
 }
 
+// getFinalRedirectURL 跟踪 302 重定向获取真实播放直链
+func (v *VideoParserPlugin) getFinalRedirectURL(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // 仅获取 302 Location，不下载数据流
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return rawURL
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1")
+	req.Header.Set("Range", "bytes=0-0")
+
+	resp, err := client.Do(req)
+	if err != nil || resp == nil {
+		return rawURL
+	}
+	defer resp.Body.Close()
+
+	if loc := resp.Header.Get("Location"); loc != "" {
+		return loc
+	}
+	return rawURL
+}
+
 func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	msg := event.Payload.(*plugin.Event_Message).Message
 	if msg == nil || msg.Type.Code != message.TypeText.Code {
@@ -105,8 +137,8 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	})
 
 	if err != nil {
-		slog.Warn("发送解析结果失败", "err", err)
-		return false, nil
+		slog.Warn("卡片发送失败，触发降级文本发送", "err", err)
+		return v.sendFallbackVideoText(msg.Sender, info)
 	}
 
 	return true, nil
@@ -139,10 +171,68 @@ func (v *VideoParserPlugin) sendImageRecord(receiver *contact.Contact, info *par
 	})
 
 	if err != nil {
-		slog.Warn("发送图文合并转发失败", "err", err)
-		return false, nil
+		slog.Warn("图文合并转发发送失败，触发降级文本发送", "err", err)
+		return v.sendFallbackImageText(receiver, info)
 	}
 
+	return true, nil
+}
+
+// sendFallbackVideoText 视频卡片发送失败时的文本降级
+func (v *VideoParserPlugin) sendFallbackVideoText(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
+	// 获取 302 重定向后的真实直链
+	finalURL := v.getFinalRedirectURL(info.VideoUrl)
+	if finalURL == "" {
+		finalURL = info.VideoUrl
+	}
+
+	targetURL := v.getRedirectVideoURL(finalURL)
+
+	authorName := info.Author.Name
+	if authorName == "" {
+		authorName = "作者"
+	}
+
+	content := fmt.Sprintf("🎬 %s\n👤 %s\n🔗 视频直链：\n%s", info.Title, authorName, targetURL)
+
+	_, err := v.message.Send(&message.Message{
+		Receiver: receiver,
+		Type:     message.TypeText,
+		Content:  content,
+	})
+	if err != nil {
+		slog.Error("降级发送纯文本依然失败", "err", err)
+		return false, err
+	}
+	return true, nil
+}
+
+// sendFallbackImageText 图文转发发送失败时的文本降级
+func (v *VideoParserPlugin) sendFallbackImageText(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
+	authorName := info.Author.Name
+	if authorName == "" {
+		authorName = "作者"
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📖 %s\n👤 %s\n🖼️ 图片直链（共 %d 张）：\n", info.Title, authorName, len(info.Images)))
+	for i, img := range info.Images {
+		if i >= 9 {
+			sb.WriteString(fmt.Sprintf("... 其余 %d 张图请查看原链接\n", len(info.Images)-9))
+			break
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, img.Url))
+	}
+
+	_, err := v.message.Send(&message.Message{
+		Receiver: receiver,
+		Type:     message.TypeText,
+		Content:  strings.TrimSpace(sb.String()),
+	})
+	if err != nil {
+		slog.Error("降级发送纯文本依然失败", "err", err)
+		return false, err
+	}
 	return true, nil
 }
 
