@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sbgayhub/golem/sdk/contact"
@@ -20,7 +19,6 @@ import (
 // Config 视频解析插件配置
 type Config struct {
 	RedirectURL string `toml:"redirect_url" comment:"视频重定向 API 地址，例如：https://next-url-redirector.pages.dev/go?url="`
-	MaxImages   int    `toml:"max_images" comment:"图集最大发送张数，默认为 9 张"`
 }
 
 type VideoParserPlugin struct {
@@ -142,9 +140,9 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 		v.httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
 
-	// 如果包含图集/图文，直接在会话中发送原生高清图片
+	// 如果包含图集/图文，发送首张封面大图 + 编号直链清单（防刷屏）
 	if len(info.Images) > 0 {
-		return v.sendDirectImages(msg.Sender, info)
+		return v.sendCoverAndImageLinks(msg.Sender, info)
 	}
 
 	videoURL := v.getRedirectVideoURL(info.VideoUrl)
@@ -171,86 +169,63 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	return true, nil
 }
 
-// sendDirectImages 并发下载并逐张发送原生微信图片
-func (v *VideoParserPlugin) sendDirectImages(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
-	maxImages := v.Config.MaxImages
-	if maxImages <= 0 {
-		maxImages = 9
-	}
-
-	imagesToFetch := info.Images
-	if len(imagesToFetch) > maxImages {
-		imagesToFetch = imagesToFetch[:maxImages]
-	}
-
-	type downloadResult struct {
-		index int
-		data  []byte
-		err   error
-	}
-
-	results := make([]downloadResult, len(imagesToFetch))
-	var wg sync.WaitGroup
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	for i, img := range imagesToFetch {
-		wg.Add(1)
-		go func(idx int, targetUrl string) {
-			defer wg.Done()
-			data, err := downloadImage(ctx, v.httpClient, targetUrl)
-			results[idx] = downloadResult{index: idx, data: data, err: err}
-		}(i, img.Url)
-	}
-	wg.Wait()
-
+// sendCoverAndImageLinks 发送首张高清封面大图 + 编号直链排版文本（防刷屏最佳实践）
+func (v *VideoParserPlugin) sendCoverAndImageLinks(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
 	authorName := info.Author.Name
 	if authorName == "" {
 		authorName = "作者"
 	}
 
-	sentCount := 0
-	for _, res := range results {
-		if res.err != nil || len(res.data) == 0 {
-			slog.Warn("下载图片失败，跳过", "idx", res.index, "err", res.err)
-			continue
-		}
+	// 1. 尝试下载并发送首张大图（封面）
+	firstImageURL := info.CoverUrl
+	if firstImageURL == "" && len(info.Images) > 0 {
+		firstImageURL = info.Images[0].Url
+	}
 
-		_, err := v.message.Send(&message.Message{
-			Receiver: receiver,
-			Type:     message.TypeImage,
-			Content:  fmt.Sprintf("[%d/%d]", res.index+1, len(imagesToFetch)),
-			Data: &message.Message_Image{
-				Image: &message.ImageData{
-					Media: &message.Media{
-						Data: res.data,
+	if firstImageURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		data, err := downloadImage(ctx, v.httpClient, firstImageURL)
+		cancel()
+
+		if err == nil && len(data) > 0 {
+			_, err = v.message.Send(&message.Message{
+				Receiver: receiver,
+				Type:     message.TypeImage,
+				Content:  "[图集封面]",
+				Data: &message.Message_Image{
+					Image: &message.ImageData{
+						Media: &message.Media{
+							Data: data,
+						},
 					},
 				},
-			},
-		})
-		if err != nil {
-			slog.Warn("发送图片失败", "idx", res.index, "err", err)
-			continue
+			})
+			if err != nil {
+				slog.Warn("发送首张封面图失败", "err", err)
+			}
+		} else {
+			slog.Warn("下载首张封面图失败", "err", err)
 		}
-		sentCount++
 	}
 
-	// 发送图文说明摘要
-	summary := fmt.Sprintf("📖 %s\n👤 %s", info.Title, authorName)
-	if len(info.Images) > len(imagesToFetch) {
-		summary += fmt.Sprintf("\n(图集共 %d 张，已发送前 %d 张高清原图)", len(info.Images), len(imagesToFetch))
+	// 2. 发送排版优雅的标题、作者与原图直链清单
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📖 %s\n👤 %s\n\n🖼️ 图集（共 %d 张原图直链）：\n", info.Title, authorName, len(info.Images)))
+	for i, img := range info.Images {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, img.Url))
+		if img.LivePhotoUrl != "" {
+			sb.WriteString(fmt.Sprintf("   🎬 实况动图: %s\n", img.LivePhotoUrl))
+		}
 	}
 
-	_, _ = v.message.Send(&message.Message{
+	_, err := v.message.Send(&message.Message{
 		Receiver: receiver,
 		Type:     message.TypeText,
-		Content:  summary,
+		Content:  strings.TrimSpace(sb.String()),
 	})
-
-	if sentCount == 0 && len(info.Images) > 0 {
-		// 如果一张图片都没成功发送，降级为直链文本
-		return v.sendFallbackImageText(receiver, info)
+	if err != nil {
+		slog.Error("发送图文直链清单失败", "err", err)
+		return false, err
 	}
 
 	return true, nil
@@ -277,35 +252,6 @@ func (v *VideoParserPlugin) sendFallbackVideoText(receiver *contact.Contact, inf
 		Receiver: receiver,
 		Type:     message.TypeText,
 		Content:  content,
-	})
-	if err != nil {
-		slog.Error("降级发送纯文本依然失败", "err", err)
-		return false, err
-	}
-	return true, nil
-}
-
-// sendFallbackImageText 图文转发发送失败时的文本降级
-func (v *VideoParserPlugin) sendFallbackImageText(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
-	authorName := info.Author.Name
-	if authorName == "" {
-		authorName = "作者"
-	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📖 %s\n👤 %s\n🖼️ 图片直链（共 %d 张）：\n", info.Title, authorName, len(info.Images)))
-	for i, img := range info.Images {
-		if i >= 9 {
-			sb.WriteString(fmt.Sprintf("... 其余 %d 张图请查看原链接\n", len(info.Images)-9))
-			break
-		}
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, img.Url))
-	}
-
-	_, err := v.message.Send(&message.Message{
-		Receiver: receiver,
-		Type:     message.TypeText,
-		Content:  strings.TrimSpace(sb.String()),
 	})
 	if err != nil {
 		slog.Error("降级发送纯文本依然失败", "err", err)

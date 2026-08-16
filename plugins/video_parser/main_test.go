@@ -62,28 +62,29 @@ func TestDirectImageSending(t *testing.T) {
 		httpClient: &http.Client{Timeout: 5 * time.Second},
 	}
 
-	handled, err := p.sendDirectImages(&contact.Contact{Username: "test_chatroom@chatroom", Nickname: "测试群"}, mockInfo)
+	handled, err := p.sendCoverAndImageLinks(&contact.Contact{Username: "test_chatroom@chatroom", Nickname: "测试群"}, mockInfo)
 	if err != nil {
-		t.Fatalf("sendDirectImages 失败: %v", err)
+		t.Fatalf("sendCoverAndImageLinks 失败: %v", err)
 	}
 	if !handled {
 		t.Fatalf("handled should be true")
 	}
 
-	if len(mockMsg.sentMessages) == 0 {
-		t.Fatalf("未发送消息")
+	if len(mockMsg.sentMessages) < 2 {
+		t.Fatalf("期望发送 2 条消息 (1张封面图 + 1条文本清单)，实际发送了 %d 条", len(mockMsg.sentMessages))
 	}
 
-	// 验证第一条是 TypeImage，最后一条是说明文本 TypeText
+	// 验证第一条是 TypeImage，第二条是说明文本 TypeText
 	firstMsg := mockMsg.sentMessages[0]
 	if firstMsg.Type != message.TypeImage {
-		t.Errorf("期望第 1 条为 TypeImage, 实际为: %v", firstMsg.Type)
+		t.Errorf("期望第 1 条为 TypeImage (封面大图), 实际为: %v", firstMsg.Type)
 	}
 
-	lastMsg := mockMsg.sentMessages[len(mockMsg.sentMessages)-1]
-	if lastMsg.Type != message.TypeText {
-		t.Errorf("期望最后一条为 TypeText 摘要, 实际为: %v", lastMsg.Type)
+	secondMsg := mockMsg.sentMessages[1]
+	if secondMsg.Type != message.TypeText {
+		t.Errorf("期望第 2 条为 TypeText (图文清单), 实际为: %v", secondMsg.Type)
 	}
+	t.Logf("文本清单输出:\n%s", secondMsg.Content)
 }
 
 func TestOnEventDouyinVideo(t *testing.T) {
