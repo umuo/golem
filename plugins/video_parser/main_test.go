@@ -47,7 +47,7 @@ func (m *mockMessageAbility) Download(*message.Message) (io.ReadCloser, error) {
 	return io.NopCloser(nil), nil
 }
 
-func TestSendCoverAndImageLinks(t *testing.T) {
+func TestSendCoverAndImageRecord(t *testing.T) {
 	mockInfo := &parser.VideoParseInfo{
 		Title: "小红书高清多图穿搭分享",
 		Images: []parser.ImgInfo{
@@ -63,28 +63,34 @@ func TestSendCoverAndImageLinks(t *testing.T) {
 		httpClient: &http.Client{Timeout: 5 * time.Second},
 	}
 
-	handled, err := p.sendCoverAndImageLinks(&contact.Contact{Username: "test_chatroom@chatroom", Nickname: "测试群"}, mockInfo)
+	handled, err := p.sendCoverAndImageRecord(&contact.Contact{Username: "test_chatroom@chatroom", Nickname: "测试群"}, mockInfo)
 	if err != nil {
-		t.Fatalf("sendCoverAndImageLinks 失败: %v", err)
+		t.Fatalf("sendCoverAndImageRecord 失败: %v", err)
 	}
 	if !handled {
 		t.Fatalf("handled should be true")
 	}
 
 	if len(mockMsg.sentMessages) < 2 {
-		t.Fatalf("期望发送 2 条消息 (1张封面图 + 1条文本清单)，实际发送了 %d 条", len(mockMsg.sentMessages))
+		t.Fatalf("期望发送 2 条消息 (1张封面图 + 1条合并转发卡片)，实际发送了 %d 条", len(mockMsg.sentMessages))
 	}
 
+	// 验证第 1 条是 TypeImage 封面大图
 	firstMsg := mockMsg.sentMessages[0]
 	if firstMsg.Type != message.TypeImage {
 		t.Errorf("期望第 1 条为 TypeImage (封面大图), 实际为: %v", firstMsg.Type)
 	}
 
+	// 验证第 2 条是 TypeApplication (SubType 19 合并转发)
 	secondMsg := mockMsg.sentMessages[1]
-	if secondMsg.Type != message.TypeText {
-		t.Errorf("期望第 2 条为 TypeText (图文清单), 实际为: %v", secondMsg.Type)
+	if secondMsg.Type != message.TypeApplication {
+		t.Errorf("期望第 2 条为 TypeApplication (合并转发), 实际为: %v", secondMsg.Type)
 	}
-	t.Logf("文本清单输出:\n%s", secondMsg.Content)
+	appData := secondMsg.Data.(*message.Message_App).App
+	if appData.SubType != 19 {
+		t.Errorf("期望 SubType 为 19, 实际为: %d", appData.SubType)
+	}
+	t.Logf("合并转发 XML:\n%s", appData.Xml)
 }
 
 func TestOnEventDouyinVideo(t *testing.T) {

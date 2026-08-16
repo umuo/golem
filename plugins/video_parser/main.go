@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"log/slog"
@@ -108,9 +110,9 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 		v.httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
 
-	// 如果包含图集/图文，发送首张封面大图 + 编号直链清单（防刷屏）
+	// 如果包含图集/图文，发送首张封面大图 + 合并转发聊天记录
 	if len(info.Images) > 0 {
-		return v.sendCoverAndImageLinks(msg.Sender, info)
+		return v.sendCoverAndImageRecord(msg.Sender, info)
 	}
 
 	videoURL := v.getRedirectVideoURL(info.VideoUrl)
@@ -137,14 +139,24 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	return true, nil
 }
 
-// sendCoverAndImageLinks 发送首张高清封面大图 + 编号直链排版文本（防刷屏最佳实践）
-func (v *VideoParserPlugin) sendCoverAndImageLinks(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
+type recordItem struct {
+	Name      string
+	Content   string
+	AvatarURL string
+}
+
+// sendCoverAndImageRecord 先发一张首图大图，再发一条合并聊天记录卡片
+func (v *VideoParserPlugin) sendCoverAndImageRecord(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
 	authorName := info.Author.Name
 	if authorName == "" {
 		authorName = "作者"
 	}
+	title := info.Title
+	if title == "" {
+		title = fmt.Sprintf("%s 的图文作品", authorName)
+	}
 
-	// 1. 尝试下载并发送首张大图（封面）
+	// 1. 发送第 1 张高清封面大图
 	firstImageURL := info.CoverUrl
 	if firstImageURL == "" && len(info.Images) > 0 {
 		firstImageURL = info.Images[0].Url
@@ -176,27 +188,105 @@ func (v *VideoParserPlugin) sendCoverAndImageLinks(receiver *contact.Contact, in
 		}
 	}
 
-	// 2. 发送排版优雅的标题、作者与原图直链清单
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📖 %s\n👤 %s\n\n🖼️ 图集（共 %d 张原图直链）：\n", info.Title, authorName, len(info.Images)))
+	// 2. 构造合并转发聊天记录（每条包含原图直链）
+	var records []recordItem
+
+	// 记录首条：标题和作者
+	records = append(records, recordItem{
+		Name:      authorName,
+		Content:   fmt.Sprintf("📖 %s", title),
+		AvatarURL: info.Author.Avatar,
+	})
+
+	// 记录后续：每张高清原图直链
 	for i, img := range info.Images {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, img.Url))
+		text := fmt.Sprintf("[图片 %d] %s", i+1, img.Url)
 		if img.LivePhotoUrl != "" {
-			sb.WriteString(fmt.Sprintf("   🎬 实况动图: %s\n", img.LivePhotoUrl))
+			text += fmt.Sprintf("\n[实况动图] %s", img.LivePhotoUrl)
 		}
+		records = append(records, recordItem{
+			Name:      authorName,
+			Content:   text,
+			AvatarURL: info.Author.Avatar,
+		})
 	}
+
+	desc := fmt.Sprintf("%s: 共 %d 张图片", authorName, len(info.Images))
+	xmlContent := buildChatRecordXML(title, desc, records)
 
 	_, err := v.message.Send(&message.Message{
 		Receiver: receiver,
-		Type:     message.TypeText,
-		Content:  strings.TrimSpace(sb.String()),
+		Type:     message.TypeApplication,
+		Content:  fmt.Sprintf("[%s] %s", title, desc),
+		Data: &message.Message_App{App: &message.AppData{
+			SubType: 19,
+			Title:   title,
+			Desc:    desc,
+			Xml:     xmlContent,
+		}},
 	})
+
 	if err != nil {
-		slog.Error("发送图文直链清单失败", "err", err)
-		return false, err
+		slog.Warn("发送图文合并转发失败，触发降级文本发送", "err", err)
+		return v.sendFallbackImageText(receiver, info)
 	}
 
 	return true, nil
+}
+
+func buildChatRecordXML(title, desc string, records []recordItem) string {
+	return fmt.Sprintf(`<appmsg appid="" sdkver="0">`+
+		`<title>%s</title>`+
+		`<des>%s</des>`+
+		`<action>view</action>`+
+		`<type>19</type>`+
+		`<url>https://support.weixin.qq.com/cgi-bin/mmsupport-bin/readtemplate?t=page/favorite_record__w_unsupport&amp;from=singlemessage&amp;isappinstalled=0</url>`+
+		`<recorditem>%s</recorditem>`+
+		`</appmsg>`, escapeXML(title), escapeXML(desc), buildRecordItemXML(title, desc, records))
+}
+
+func buildRecordItemXML(title, desc string, records []recordItem) string {
+	var builder strings.Builder
+	builder.WriteString("<![CDATA[<recordinfo>\n")
+	builder.WriteString(fmt.Sprintf("<title>%s</title>\n", escapeXML(title)))
+	builder.WriteString(fmt.Sprintf("<desc>%s</desc>\n", escapeXML(desc)))
+	builder.WriteString(fmt.Sprintf("<datalist count=\"%d\">\n", len(records)))
+
+	base := time.Now()
+	for i, record := range records {
+		t := base.Add(time.Duration(i) * time.Second)
+		timeStr := t.Format("2006-01-02 15:04:05")
+
+		builder.WriteString(fmt.Sprintf(
+			"<dataitem datatype=\"1\" dataid=\"d_%d_%d\" htmlid=\"\">\n"+
+				"\t<datadesc>%s</datadesc>\n"+
+				"\t<sourcename>%s</sourcename>\n"+
+				"\t<sourceheadurl>%s</sourceheadurl>\n"+
+				"\t<sourcetime>%s</sourcetime>\n"+
+				"\t<srcMsgCreateTime>%d</srcMsgCreateTime>\n"+
+				"\t<fromnewmsgid>%d</fromnewmsgid>\n"+
+				"</dataitem>\n",
+			t.Unix(),
+			i,
+			escapeXML(record.Content),
+			escapeXML(record.Name),
+			escapeXML(record.AvatarURL),
+			escapeXML(timeStr),
+			t.Unix(),
+			t.UnixNano(),
+		))
+	}
+
+	builder.WriteString("</datalist></recordinfo>]]>")
+	return builder.String()
+}
+
+func escapeXML(value string) string {
+	var buffer bytes.Buffer
+	if err := xml.EscapeText(&buffer, []byte(value)); err != nil {
+		return value
+	}
+	return buffer.String()
 }
 
 // sendFallbackVideoText 视频卡片发送失败时的文本降级
@@ -213,6 +303,35 @@ func (v *VideoParserPlugin) sendFallbackVideoText(receiver *contact.Contact, inf
 		Receiver: receiver,
 		Type:     message.TypeText,
 		Content:  content,
+	})
+	if err != nil {
+		slog.Error("降级发送纯文本依然失败", "err", err)
+		return false, err
+	}
+	return true, nil
+}
+
+// sendFallbackImageText 图文转发发送失败时的文本降级
+func (v *VideoParserPlugin) sendFallbackImageText(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
+	authorName := info.Author.Name
+	if authorName == "" {
+		authorName = "作者"
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📖 %s\n👤 %s\n🖼️ 图片直链（共 %d 张）：\n", info.Title, authorName, len(info.Images)))
+	for i, img := range info.Images {
+		if i >= 9 {
+			sb.WriteString(fmt.Sprintf("... 其余 %d 张图请查看原链接\n", len(info.Images)-9))
+			break
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, img.Url))
+	}
+
+	_, err := v.message.Send(&message.Message{
+		Receiver: receiver,
+		Type:     message.TypeText,
+		Content:  strings.TrimSpace(sb.String()),
 	})
 	if err != nil {
 		slog.Error("降级发送纯文本依然失败", "err", err)
