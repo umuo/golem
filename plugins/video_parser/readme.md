@@ -32,23 +32,24 @@ https://v.kuaishou.com/xxxxx
 https://xhslink.cn/xxxxx
 ```
 
-插件会自动识别并解析：
-- **视频**：返回视频卡片（支持重定向中转配置）
-- **图文笔记**：以合并转发聊天记录形式直接展示全部高清原图
+### 使用方式
 
-## ⚙️ 插件配置
+直接在聊天中发送包含视频分享链接的消息：
 
-在 `host/plugins/config.toml` 中可以为 `video_parser` 进行个性化配置：
-
-```toml
-[video_parser]
-enable = true
-
-[video_parser.config]
-# 视频直链重定向 API 地址（可选）。
-# 配置后，视频卡片直链会自动包装为中转地址（防止微信外链风控折叠）；未配置则直接发送原始直链。
-redirect_url = "https://next-url-redirector.pages.dev/go?url="
 ```
+# 抖音分享链接
+https://v.douyin.com/xxxxx/
+
+# 快手分享链接
+https://v.kuaishou.com/xxxxx
+
+# 小红书分享链接
+https://xhslink.cn/xxxxx
+```
+
+插件会自动识别并解析：
+- **视频**：直接发送视频卡片（包含标题、作者、直链、封面），若发送失败自动降级为文本直链
+- **图文笔记**：发送首张封面大图 + 编号原图直链清单（防刷屏）
 
 ## 🎯 工作原理
 

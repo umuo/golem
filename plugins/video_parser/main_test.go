@@ -29,6 +29,7 @@ func (m *mockMessageAbility) Send(msg *message.Message) (*message.Send_Response,
 		fmt.Printf("App.SubType: %d\n", appData.App.SubType)
 		fmt.Printf("App.Title  : %s\n", appData.App.Title)
 		fmt.Printf("App.Desc   : %s\n", appData.App.Desc)
+		fmt.Printf("App.Url    : %s\n", appData.App.Url)
 		fmt.Printf("App.Xml    :\n%s\n", appData.App.Xml)
 	}
 	return &message.Send_Response{NewId: 1}, nil
@@ -46,7 +47,7 @@ func (m *mockMessageAbility) Download(*message.Message) (io.ReadCloser, error) {
 	return io.NopCloser(nil), nil
 }
 
-func TestDirectImageSending(t *testing.T) {
+func TestSendCoverAndImageLinks(t *testing.T) {
 	mockInfo := &parser.VideoParseInfo{
 		Title: "小红书高清多图穿搭分享",
 		Images: []parser.ImgInfo{
@@ -74,7 +75,6 @@ func TestDirectImageSending(t *testing.T) {
 		t.Fatalf("期望发送 2 条消息 (1张封面图 + 1条文本清单)，实际发送了 %d 条", len(mockMsg.sentMessages))
 	}
 
-	// 验证第一条是 TypeImage，第二条是说明文本 TypeText
 	firstMsg := mockMsg.sentMessages[0]
 	if firstMsg.Type != message.TypeImage {
 		t.Errorf("期望第 1 条为 TypeImage (封面大图), 实际为: %v", firstMsg.Type)
@@ -116,31 +116,6 @@ func TestOnEventDouyinVideo(t *testing.T) {
 	t.Log("抖音视频流程测试成功")
 }
 
-func TestGetRedirectVideoURL(t *testing.T) {
-	p := &VideoParserPlugin{}
-
-	rawURL := "https://www.iesdouyin.com/aweme/v1/play/?video_id=v2800fgi0000d9r7uofog65ju1flrgp0&ratio=1080p&line=0"
-
-	// 1. 无配置
-	if got := p.getRedirectVideoURL(rawURL); got != rawURL {
-		t.Errorf("期望无配置返回原始链接，实际: %s", got)
-	}
-
-	// 2. 配置了带等号的 redirect_url: https://next-url-redirector.pages.dev/go?url=
-	p.Config.RedirectURL = "https://next-url-redirector.pages.dev/go?url="
-	expected := "https://next-url-redirector.pages.dev/go?url=https%3A%2F%2Fwww.iesdouyin.com%2Faweme%2Fv1%2Fplay%2F%3Fvideo_id%3Dv2800fgi0000d9r7uofog65ju1flrgp0%26ratio%3D1080p%26line%3D0"
-	if got := p.getRedirectVideoURL(rawURL); got != expected {
-		t.Errorf("期望重定向格式:\n%s\n实际:\n%s", expected, got)
-	}
-
-	// 3. 配置了带模板的 redirect_url: https://example.com/play?target={url}&v=1
-	p.Config.RedirectURL = "https://example.com/play?target={url}&v=1"
-	expectedTemplate := "https://example.com/play?target=https%3A%2F%2Fwww.iesdouyin.com%2Faweme%2Fv1%2Fplay%2F%3Fvideo_id%3Dv2800fgi0000d9r7uofog65ju1flrgp0%26ratio%3D1080p%26line%3D0&v=1"
-	if got := p.getRedirectVideoURL(rawURL); got != expectedTemplate {
-		t.Errorf("期望模板替换格式:\n%s\n实际:\n%s", expectedTemplate, got)
-	}
-}
-
 func TestFallbackVideoText(t *testing.T) {
 	mockMsg := &mockMessageAbility{}
 	p := &VideoParserPlugin{
@@ -149,7 +124,7 @@ func TestFallbackVideoText(t *testing.T) {
 
 	info := &parser.VideoParseInfo{
 		Title:    "张震岳悉尼演唱会",
-		VideoUrl: "https://www.iesdouyin.com/aweme/v1/play/?video_id=v2800fgi0000d9r7uofog65ju1flrgp0&ratio=1080p&line=0",
+		VideoUrl: "https://v5-se-ws-cold.douyinvod.com/example/video.mp4",
 	}
 	info.Author.Name = "張震嶽"
 
