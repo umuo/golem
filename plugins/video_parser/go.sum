@@ -62,8 +62,8 @@ github.com/tidwall/match v1.2.0/go.mod h1:eRSPERbgtNPcGhD8UCthc6PmLEQXEWd3PRB5JT
 github.com/tidwall/pretty v1.2.0/go.mod h1:ITEVvHYasfjBbM0u2Pg8T2nJnzm8xPwvNhhsoaGGjNU=
 github.com/tidwall/pretty v1.2.1 h1:qjsOFOWWQl+N3RsoF5/ssm1pHmJJwhjlSbZ51I6wMl4=
 github.com/tidwall/pretty v1.2.1/go.mod h1:ITEVvHYasfjBbM0u2Pg8T2nJnzm8xPwvNhhsoaGGjNU=
-github.com/umuo/parse-video v0.0.0-20260816022236-8ecefd7ab231 h1:54tTteisK9MZ+pQ2iuyJhDQT0QgXdMlE0rZrk3/wXBo=
-github.com/umuo/parse-video v0.0.0-20260816022236-8ecefd7ab231/go.mod h1:9QvJnvqU8kMuvo+9AY0Y6aFlQvs55Rs9yIy1KrlrfoA=
+github.com/umuo/parse-video v0.0.0-20260816032716-c52a59a7977b h1:jwHpvOS22p9eNhCE4YQVzkj0BHvgGdaLr6KpP4nMxlI=
+github.com/umuo/parse-video v0.0.0-20260816032716-c52a59a7977b/go.mod h1:9QvJnvqU8kMuvo+9AY0Y6aFlQvs55Rs9yIy1KrlrfoA=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=

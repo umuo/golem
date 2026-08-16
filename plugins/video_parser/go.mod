@@ -32,4 +32,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/wujunwei928/parse-video => github.com/umuo/parse-video v0.0.0-20260816022236-8ecefd7ab231
+replace github.com/wujunwei928/parse-video => github.com/umuo/parse-video v0.0.0-20260816032716-c52a59a7977b

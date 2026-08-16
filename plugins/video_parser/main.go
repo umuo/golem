@@ -44,15 +44,23 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 		return false, err
 	}
 
+	targetUrl := info.VideoUrl
+	if targetUrl == "" && len(info.Images) > 0 {
+		targetUrl = info.CoverUrl
+		if targetUrl == "" {
+			targetUrl = info.Images[0].Url
+		}
+	}
+
 	_, err = v.message.Send(&message.Message{
 		Receiver: msg.Sender,
 		Type:     message.TypeAppLink,
-		Content:  fmt.Sprintf("[%s] %s", info.Title, info.VideoUrl),
+		Content:  fmt.Sprintf("[%s] %s", info.Title, targetUrl),
 		Data: &message.Message_App{App: &message.AppData{
 			SubType: 5,
 			Title:   info.Title,
 			Desc:    info.Author.Name,
-			Url:     info.VideoUrl,
+			Url:     targetUrl,
 			Xml:     info.CoverUrl,
 		}},
 	})
