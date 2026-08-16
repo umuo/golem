@@ -1,14 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/sbgayhub/golem/sdk/cdn"
 	"github.com/sbgayhub/golem/sdk/contact"
 	"github.com/sbgayhub/golem/sdk/message"
 	"github.com/sbgayhub/golem/sdk/plugin"
@@ -17,13 +19,13 @@ import (
 
 // Config 视频解析插件配置
 type Config struct {
-	RedirectURL string `toml:"redirect_url" comment:"重定向 API 地址，例如：https://next-url-redirector.pages.dev/go?url="`
+	RedirectURL string `toml:"redirect_url" comment:"视频重定向 API 地址，例如：https://next-url-redirector.pages.dev/go?url="`
+	MaxImages   int    `toml:"max_images" comment:"图集最大发送张数，默认为 9 张"`
 }
 
 type VideoParserPlugin struct {
 	plugin.ConfigAbility[Config]
 	message    message.Ability
-	cdn        cdn.Ability
 	httpClient *http.Client
 }
 
@@ -32,7 +34,7 @@ func (v *VideoParserPlugin) GetMetadata() *plugin.Metadata {
 		Name:        "video_parser",
 		Author:      "ovo",
 		Version:     "v1.0.0",
-		Description: "视频在线解析插件",
+		Description: "视频/图文在线解析插件",
 		Priority:    100,
 		Next:        false,
 		AlwaysRun:   false,
@@ -96,6 +98,31 @@ func (v *VideoParserPlugin) getFinalRedirectURL(rawURL string) string {
 	return rawURL
 }
 
+func downloadImage(ctx context.Context, client *http.Client, imgUrl string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", imgUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	if strings.Contains(imgUrl, "xhscdn.com") || strings.Contains(imgUrl, "xiaohongshu.com") {
+		req.Header.Set("Referer", "https://www.xiaohongshu.com/")
+	} else if strings.Contains(imgUrl, "douyinpic.com") || strings.Contains(imgUrl, "byteimg.com") {
+		req.Header.Set("Referer", "https://www.douyin.com/")
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http status %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
 func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	msg := event.Payload.(*plugin.Event_Message).Message
 	if msg == nil || msg.Type.Code != message.TypeText.Code {
@@ -115,9 +142,9 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 		v.httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
 
-	// 如果包含图集/图文，发送合并转发聊天记录
+	// 如果包含图集/图文，直接在会话中发送原生高清图片
 	if len(info.Images) > 0 {
-		return v.sendImageRecord(msg.Sender, info)
+		return v.sendDirectImages(msg.Sender, info)
 	}
 
 	videoURL := v.getRedirectVideoURL(info.VideoUrl)
@@ -144,34 +171,85 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	return true, nil
 }
 
-func (v *VideoParserPlugin) sendImageRecord(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
+// sendDirectImages 并发下载并逐张发送原生微信图片
+func (v *VideoParserPlugin) sendDirectImages(receiver *contact.Contact, info *parser.VideoParseInfo) (bool, error) {
+	maxImages := v.Config.MaxImages
+	if maxImages <= 0 {
+		maxImages = 9
+	}
+
+	imagesToFetch := info.Images
+	if len(imagesToFetch) > maxImages {
+		imagesToFetch = imagesToFetch[:maxImages]
+	}
+
+	type downloadResult struct {
+		index int
+		data  []byte
+		err   error
+	}
+
+	results := make([]downloadResult, len(imagesToFetch))
+	var wg sync.WaitGroup
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	for i, img := range imagesToFetch {
+		wg.Add(1)
+		go func(idx int, targetUrl string) {
+			defer wg.Done()
+			data, err := downloadImage(ctx, v.httpClient, targetUrl)
+			results[idx] = downloadResult{index: idx, data: data, err: err}
+		}(i, img.Url)
+	}
+	wg.Wait()
+
 	authorName := info.Author.Name
 	if authorName == "" {
 		authorName = "作者"
 	}
-	title := info.Title
-	if title == "" {
-		title = fmt.Sprintf("%s 的图文作品", authorName)
+
+	sentCount := 0
+	for _, res := range results {
+		if res.err != nil || len(res.data) == 0 {
+			slog.Warn("下载图片失败，跳过", "idx", res.index, "err", res.err)
+			continue
+		}
+
+		_, err := v.message.Send(&message.Message{
+			Receiver: receiver,
+			Type:     message.TypeImage,
+			Content:  fmt.Sprintf("[%d/%d]", res.index+1, len(imagesToFetch)),
+			Data: &message.Message_Image{
+				Image: &message.ImageData{
+					Media: &message.Media{
+						Data: res.data,
+					},
+				},
+			},
+		})
+		if err != nil {
+			slog.Warn("发送图片失败", "idx", res.index, "err", err)
+			continue
+		}
+		sentCount++
 	}
-	desc := fmt.Sprintf("%s: 共 %d 张图片", authorName, len(info.Images))
 
-	items := v.buildImageRecordItems(info)
-	xmlContent := buildChatRecordXML(title, desc, items, info.Author.Avatar)
+	// 发送图文说明摘要
+	summary := fmt.Sprintf("📖 %s\n👤 %s", info.Title, authorName)
+	if len(info.Images) > len(imagesToFetch) {
+		summary += fmt.Sprintf("\n(图集共 %d 张，已发送前 %d 张高清原图)", len(info.Images), len(imagesToFetch))
+	}
 
-	_, err := v.message.Send(&message.Message{
+	_, _ = v.message.Send(&message.Message{
 		Receiver: receiver,
-		Type:     message.TypeApplication,
-		Content:  fmt.Sprintf("[%s] %s", title, desc),
-		Data: &message.Message_App{App: &message.AppData{
-			SubType: 19,
-			Title:   title,
-			Desc:    desc,
-			Xml:     xmlContent,
-		}},
+		Type:     message.TypeText,
+		Content:  summary,
 	})
 
-	if err != nil {
-		slog.Warn("图文合并转发发送失败，触发降级文本发送", "err", err)
+	if sentCount == 0 && len(info.Images) > 0 {
+		// 如果一张图片都没成功发送，降级为直链文本
 		return v.sendFallbackImageText(receiver, info)
 	}
 

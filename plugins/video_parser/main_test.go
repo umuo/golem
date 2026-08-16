@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
 	"testing"
 	"time"
 
-	"github.com/sbgayhub/golem/sdk/cdn"
 	"github.com/sbgayhub/golem/sdk/contact"
 	"github.com/sbgayhub/golem/sdk/message"
 	"github.com/sbgayhub/golem/sdk/plugin"
@@ -48,50 +46,7 @@ func (m *mockMessageAbility) Download(*message.Message) (io.ReadCloser, error) {
 	return io.NopCloser(nil), nil
 }
 
-type mockCDNAbility struct{}
-
-func (c *mockCDNAbility) UploadImage(receiver string, reader io.Reader) (*cdn.UploadImage_Response, error) {
-	buf := new(bytes.Buffer)
-	_, _ = buf.ReadFrom(reader)
-	data := buf.Bytes()
-	fileId := fmt.Sprintf("mock_cdn_file_%d", time.Now().UnixNano())
-	aesKey := "0123456789abcdef0123456789abcdef"
-	fileMd5 := md5Hex(data)
-	fileSize := uint32(len(data))
-
-	return &cdn.UploadImage_Response{
-		FileId:    &fileId,
-		AesKey:    &aesKey,
-		FileMd5:   &fileMd5,
-		FileSize:  &fileSize,
-		ThumbSize: &fileSize,
-		ThumbMd5:  &fileMd5,
-	}, nil
-}
-
-func (c *mockCDNAbility) UploadVideo(string, []byte, io.Reader, uint32) (*cdn.UploadVideo_Response, error) {
-	return nil, nil
-}
-func (c *mockCDNAbility) DownloadImage(string, string) (io.ReadCloser, error) {
-	return io.NopCloser(nil), nil
-}
-func (c *mockCDNAbility) DownloadVideo(string, string) (io.ReadCloser, error) {
-	return io.NopCloser(nil), nil
-}
-func (c *mockCDNAbility) UploadMomentsImage([]byte) (*cdn.UploadMomentsImage_Response, error) {
-	return nil, nil
-}
-func (c *mockCDNAbility) UploadMomentsVideo([]byte, []byte) (*cdn.UploadMomentsVideo_Response, error) {
-	return nil, nil
-}
-func (c *mockCDNAbility) DownloadVideoCover(string, string) ([]byte, error) {
-	return nil, nil
-}
-func (c *mockCDNAbility) DownloadMomentsVideo(string, uint64) ([]byte, error) {
-	return nil, nil
-}
-
-func TestImageRecordBuilding(t *testing.T) {
+func TestDirectImageSending(t *testing.T) {
 	mockInfo := &parser.VideoParseInfo{
 		Title: "小红书高清多图穿搭分享",
 		Images: []parser.ImgInfo{
@@ -102,16 +57,14 @@ func TestImageRecordBuilding(t *testing.T) {
 	mockInfo.Author.Avatar = "https://example.com/avatar.jpg"
 
 	mockMsg := &mockMessageAbility{}
-	mockCDN := &mockCDNAbility{}
 	p := &VideoParserPlugin{
 		message:    mockMsg,
-		cdn:        mockCDN,
 		httpClient: &http.Client{Timeout: 5 * time.Second},
 	}
 
-	handled, err := p.sendImageRecord(&contact.Contact{Username: "test_chatroom@chatroom", Nickname: "测试群"}, mockInfo)
+	handled, err := p.sendDirectImages(&contact.Contact{Username: "test_chatroom@chatroom", Nickname: "测试群"}, mockInfo)
 	if err != nil {
-		t.Fatalf("sendImageRecord 失败: %v", err)
+		t.Fatalf("sendDirectImages 失败: %v", err)
 	}
 	if !handled {
 		t.Fatalf("handled should be true")
@@ -121,10 +74,15 @@ func TestImageRecordBuilding(t *testing.T) {
 		t.Fatalf("未发送消息")
 	}
 
-	sent := mockMsg.sentMessages[0]
-	appData := sent.Data.(*message.Message_App).App
-	if appData.SubType != 19 {
-		t.Errorf("期望 SubType 19 (合并转发), 实际: %d", appData.SubType)
+	// 验证第一条是 TypeImage，最后一条是说明文本 TypeText
+	firstMsg := mockMsg.sentMessages[0]
+	if firstMsg.Type != message.TypeImage {
+		t.Errorf("期望第 1 条为 TypeImage, 实际为: %v", firstMsg.Type)
+	}
+
+	lastMsg := mockMsg.sentMessages[len(mockMsg.sentMessages)-1]
+	if lastMsg.Type != message.TypeText {
+		t.Errorf("期望最后一条为 TypeText 摘要, 实际为: %v", lastMsg.Type)
 	}
 }
 
