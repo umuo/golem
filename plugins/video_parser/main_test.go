@@ -178,3 +178,20 @@ func TestGetRedirectVideoURL(t *testing.T) {
 		t.Errorf("期望模板替换格式:\n%s\n实际:\n%s", expectedTemplate, got)
 	}
 }
+
+func TestEnsureJpegBytes(t *testing.T) {
+	// 1. 已是 JPEG 格式直接原样返回
+	jpegData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01}
+	res := ensureJpegBytes(jpegData)
+	if len(res) != len(jpegData) {
+		t.Errorf("expected jpeg data untouched, got len %d", len(res))
+	}
+
+	// 2. 短数据原样返回
+	shortData := []byte{0x01, 0x02}
+	res2 := ensureJpegBytes(shortData)
+	if len(res2) != len(shortData) {
+		t.Errorf("expected short data untouched, got len %d", len(res2))
+	}
+}
+

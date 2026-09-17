@@ -5,12 +5,18 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/image/webp"
 
 	"github.com/sbgayhub/golem/sdk/contact"
 	"github.com/sbgayhub/golem/sdk/message"
@@ -88,8 +94,49 @@ func downloadImage(ctx context.Context, client *http.Client, imgUrl string) ([]b
 		return nil, fmt.Errorf("http status %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return ensureJpegBytes(data), nil
 }
+
+// ensureJpegBytes 确保图片为微信原生协议支持的 JPEG 格式。
+// 微信客户端发送图片时不支持 WebP 二进制，直接发送会报 code: -1, message: SYS。
+// 本函数检测 WebP 及非标准图片并自动转码为标准 JPEG。
+func ensureJpegBytes(data []byte) []byte {
+	if len(data) < 12 {
+		return data
+	}
+	// 如果已经是标准 JPEG（0xFF, 0xD8），无需二次编解码
+	if data[0] == 0xFF && data[1] == 0xD8 {
+		return data
+	}
+
+	// 如果是 WebP 格式（以 RIFF 开头且包含 WEBP）
+	if bytes.HasPrefix(data, []byte("RIFF")) && len(data) >= 12 && bytes.Equal(data[8:12], []byte("WEBP")) {
+		img, err := webp.Decode(bytes.NewReader(data))
+		if err == nil && img != nil {
+			var buf bytes.Buffer
+			if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err == nil && buf.Len() > 0 {
+				return buf.Bytes()
+			}
+		}
+	}
+
+	// 兜底尝试通过标准库解码并转为 JPEG
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err == nil && img != nil {
+		var buf bytes.Buffer
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err == nil && buf.Len() > 0 {
+			return buf.Bytes()
+		}
+	}
+
+	return data
+}
+
 
 func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	msg := event.Payload.(*plugin.Event_Message).Message
