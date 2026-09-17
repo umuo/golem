@@ -5,6 +5,7 @@
 *.so
 *.dylib
 *.bak
+golem_*
 
 # jetbrains
 .idea
