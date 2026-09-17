@@ -26,7 +26,9 @@ import (
 
 // Config 视频解析插件配置
 type Config struct {
-	RedirectURL string `toml:"redirect_url" comment:"视频直链重定向 API 地址，例如：https://next-url-redirector.pages.dev/go?url="`
+	RedirectURL      string `toml:"redirect_url" comment:"中转重定向 API 地址（默认用于封面缩略图），例如：https://next-url-redirector.pages.dev/go?url="`
+	ThumbRedirectURL string `toml:"thumb_redirect_url" comment:"专门用于封面缩略图的代理地址（留空则优先继承 redirect_url）"`
+	RedirectVideo    bool   `toml:"redirect_video" comment:"是否对卡片内的视频播放地址也开启重定向，默认 false（保持官方直链，防止被 weixin110 拦截）"`
 }
 
 type VideoParserPlugin struct {
@@ -52,24 +54,39 @@ func (v *VideoParserPlugin) GetSubscriptions() []string {
 }
 
 func (v *VideoParserPlugin) getRedirectVideoURL(rawVideoURL string) string {
-	redirectURL := strings.TrimSpace(v.Config.RedirectURL)
-	if redirectURL == "" || rawVideoURL == "" {
+	if !v.Config.RedirectVideo {
 		return rawVideoURL
 	}
+	return v.formatRedirectURL(v.Config.RedirectURL, rawVideoURL)
+}
 
-	if strings.Contains(redirectURL, "{url}") {
-		return strings.ReplaceAll(redirectURL, "{url}", url.QueryEscape(rawVideoURL))
+func (v *VideoParserPlugin) getRedirectThumbURL(rawThumbURL string) string {
+	targetRedirect := strings.TrimSpace(v.Config.ThumbRedirectURL)
+	if targetRedirect == "" {
+		targetRedirect = strings.TrimSpace(v.Config.RedirectURL)
+	}
+	return v.formatRedirectURL(targetRedirect, rawThumbURL)
+}
+
+func (v *VideoParserPlugin) formatRedirectURL(redirectTemplate, targetURL string) string {
+	redirectTemplate = strings.TrimSpace(redirectTemplate)
+	if redirectTemplate == "" || targetURL == "" {
+		return targetURL
 	}
 
-	if strings.HasSuffix(redirectURL, "=") {
-		return redirectURL + url.QueryEscape(rawVideoURL)
+	if strings.Contains(redirectTemplate, "{url}") {
+		return strings.ReplaceAll(redirectTemplate, "{url}", url.QueryEscape(targetURL))
 	}
 
-	if strings.Contains(redirectURL, "?") {
-		return redirectURL + "&url=" + url.QueryEscape(rawVideoURL)
+	if strings.HasSuffix(redirectTemplate, "=") {
+		return redirectTemplate + url.QueryEscape(targetURL)
 	}
 
-	return redirectURL + "?url=" + url.QueryEscape(rawVideoURL)
+	if strings.Contains(redirectTemplate, "?") {
+		return redirectTemplate + "&url=" + url.QueryEscape(targetURL)
+	}
+
+	return redirectTemplate + "?url=" + url.QueryEscape(targetURL)
 }
 
 func downloadImage(ctx context.Context, client *http.Client, imgUrl string) ([]byte, error) {
@@ -163,6 +180,7 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 	}
 
 	videoURL := v.getRedirectVideoURL(info.VideoUrl)
+	thumbURL := v.getRedirectThumbURL(info.CoverUrl)
 
 	// 视频消息：发送链接卡片
 	_, err = v.message.Send(&message.Message{
@@ -174,7 +192,7 @@ func (v *VideoParserPlugin) OnEvent(event *plugin.Event) (bool, error) {
 			Title:   info.Title,
 			Desc:    info.Author.Name,
 			Url:     videoURL,
-			Xml:     info.CoverUrl,
+			Xml:     thumbURL,
 		}},
 	})
 
