@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/sbgayhub/golem/sdk v0.1.1
 	github.com/wujunwei928/parse-video v0.0.2
+	golang.org/x/image v0.46.0
 )
 
 require (
@@ -24,7 +25,6 @@ require (
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
-	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
@@ -33,4 +33,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/wujunwei928/parse-video => github.com/umuo/parse-video v0.0.0-20260917160512-555f152cd76a
+replace github.com/wujunwei928/parse-video => github.com/umuo/parse-video v0.0.0-20260925130749-61eb47c4a5e9
